@@ -1,0 +1,54 @@
+{% extends "base.html" %}
+{% block title %}Sesiones · {{ project_name }}{% endblock %}
+{% block heading %}Sesiones activas{% endblock %}
+{% block content %}
+<section class="metric-grid" id="metrics">
+  <article class="metric-card"><span>Total</span><strong id="metric-total">0</strong><small>agentes registrados</small></article>
+  <article class="metric-card online"><span>Online</span><strong id="metric-online">0</strong><small>check-in reciente</small></article>
+  <article class="metric-card idle"><span>Idle</span><strong id="metric-idle">0</strong><small>respuesta retrasada</small></article>
+  <article class="metric-card"><span>Tareas / 1h</span><strong id="metric-tasks">0</strong><small>actividad reciente</small></article>
+</section>
+
+<section class="panel">
+  <div class="panel-header toolbar">
+    <div>
+      <h2>Inventario de sesiones</h2>
+      <p>Selecciona un host para abrir su consola y revisar el historial.</p>
+    </div>
+    <div class="toolbar-actions">
+      <label class="search-box">
+        <span>⌕</span>
+        <input id="session-search" placeholder="Buscar hostname, usuario, IP…">
+      </label>
+      <select id="status-filter" class="compact-select">
+        <option value="all">Todos los estados</option>
+        <option value="online">Online</option>
+        <option value="idle">Idle</option>
+        <option value="offline">Offline</option>
+      </select>
+    </div>
+  </div>
+
+  <div class="table-wrap">
+    <table class="data-table">
+      <thead>
+        <tr>
+          <th>Estado</th>
+          <th>Sesión</th>
+          <th>Usuario</th>
+          <th>Plataforma</th>
+          <th>Origen</th>
+          <th>Último check-in</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody id="sessions-body">
+        <tr><td colspan="7"><div class="empty-state">Cargando sesiones…</div></td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endblock %}
+{% block scripts %}
+<script src="/static/dashboard.js" defer></script>
+{% endblock %}

@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <meta name="theme-color" content="#0a0a0d">
+  <title>{% block title %}{{ project_name }}{% endblock %}</title>
+  <link rel="icon" type="image/png" href="/static/img/favicon.png">
+  <link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="sidebar">
+      <a class="brand" href="/">
+        <img class="brand-logo" src="/static/img/cybersen-forge-logo.png" alt="Cybersen Forge">
+        <span>
+          <strong>{{ project_name }}</strong>
+          <small>Command &amp; Control Console</small>
+        </span>
+      </a>
+
+      <nav class="nav-list">
+        <a href="/" class="nav-item {% if active_page == 'sessions' %}active{% endif %}">
+          <span class="nav-icon">◫</span>
+          <span>Sesiones</span>
+        </a>
+        <div class="nav-item disabled" title="Próxima fase">
+          <span class="nav-icon">⌁</span>
+          <span>Relays</span>
+          <span class="nav-tag">Soon</span>
+        </div>
+        <div class="nav-item disabled" title="Próxima fase">
+          <span class="nav-icon">◎</span>
+          <span>Auditoría</span>
+          <span class="nav-tag">Soon</span>
+        </div>
+      </nav>
+
+      <div class="sidebar-footer">
+        <div class="identity-card">
+          <span class="identity-label">Equipo</span>
+          <strong>{{ team_name }}</strong>
+          <span class="identity-label">Operador</span>
+          <span>{{ operator_name }}</span>
+        </div>
+        <form action="/logout" method="post">
+          <button class="logout-button" type="submit">Cerrar sesión</button>
+        </form>
+      </div>
+    </aside>
+
+    <section class="content-shell">
+      <header class="topbar">
+        <div>
+          <p class="eyebrow">CYBERSEN OFFENSIVE SECURITY LAB</p>
+          <h1>{% block heading %}Sesiones{% endblock %}</h1>
+        </div>
+        <div class="nonce-pill">
+          <span>TEAM NONCE</span>
+          <strong>{{ nonce }}</strong>
+        </div>
+      </header>
+
+      <main class="main-content">
+        {% block content %}{% endblock %}
+      </main>
+    </section>
+  </div>
+  <script src="/static/common.js"></script>
+  {% block scripts %}{% endblock %}
+</body>
+</html>

@@ -1,0 +1,95 @@
+{% extends "base.html" %}
+{% block title %}Consola · {{ project_name }}{% endblock %}
+{% block heading %}<span id="page-session-name">Consola de sesión</span>{% endblock %}
+{% block content %}
+<div id="session-root" data-agent-id="{{ agent_id }}">
+  <section class="session-hero panel">
+    <div class="session-identity">
+      <div class="os-avatar" id="os-avatar">L</div>
+      <div>
+        <div class="title-row">
+          <h2 id="session-name">Cargando…</h2>
+          <span id="session-status" class="status-badge unknown">unknown</span>
+        </div>
+        <p id="session-subtitle">Esperando información del agente.</p>
+      </div>
+    </div>
+    <div class="session-actions">
+      <a href="/" class="secondary-button">← Volver</a>
+      <button id="rename-button" class="secondary-button" type="button">Renombrar</button>
+    </div>
+  </section>
+
+  <section class="detail-grid">
+    <article class="detail-card"><span>Dirección observada</span><strong id="detail-ip">—</strong></article>
+    <article class="detail-card"><span>Proceso</span><strong id="detail-pid">—</strong></article>
+    <article class="detail-card"><span>Ruta de conexión</span><strong id="detail-route">Directa</strong></article>
+    <article class="detail-card"><span>Último check-in</span><strong id="detail-seen">—</strong></article>
+  </section>
+
+  <section class="panel terminal-panel">
+    <div class="panel-header terminal-toolbar">
+      <div>
+        <p class="eyebrow">SESSION TASK TERMINAL</p>
+        <h2>Consola operativa</h2>
+        <p id="mode-description">Diagnóstico del host mediante módulos auditables.</p>
+      </div>
+      <div class="mode-switch" role="group" aria-label="Modo de ejecución">
+        <button type="button" class="mode-button active" data-mode="host">Host</button>
+        <button type="button" class="mode-button" data-mode="sandbox" id="sandbox-mode-button">Sandbox</button>
+      </div>
+    </div>
+
+    <div class="capability-strip">
+      <span class="capability-item"><span class="capability-dot"></span><strong id="capability-host">Host modules</strong></span>
+      <span class="capability-item"><span class="capability-dot"></span><strong id="capability-sandbox">Sandbox: comprobando…</strong></span>
+      <span class="capability-note">El modo sandbox admite comandos libres dentro de un contenedor aislado sin red ni acceso general al host.</span>
+    </div>
+
+    <div id="terminal-transcript" class="terminal-transcript" aria-live="polite">
+      <div class="terminal-welcome">
+        <strong>Cybersen Forge session console</strong>
+        <span>Selecciona un modo y envía una tarea.</span>
+      </div>
+    </div>
+
+    <form id="command-form" class="command-form terminal-command-form">
+      <div class="terminal-input terminal-input-large">
+        <span class="terminal-prompt" id="terminal-prompt">host$</span>
+        <input id="command-input" autocomplete="off" spellcheck="false" placeholder="hostname" maxlength="2048" required>
+        <button class="primary-button" type="submit">Ejecutar</button>
+      </div>
+    </form>
+
+    <div class="quick-commands" id="quick-commands"></div>
+    <div id="command-feedback" class="command-feedback" aria-live="polite"></div>
+  </section>
+
+  <section class="panel history-panel">
+    <div class="panel-header toolbar">
+      <div>
+        <h2>Historial de tareas</h2>
+        <p>Los resultados abiertos permanecen abiertos durante las actualizaciones.</p>
+      </div>
+      <div class="history-actions">
+        <select id="task-filter" class="compact-select">
+          <option value="all">Todos</option>
+          <option value="pending">Pending</option>
+          <option value="dispatched">Dispatched</option>
+          <option value="completed">Completed</option>
+          <option value="failed">Failed</option>
+          <option value="cancelled">Cancelled</option>
+        </select>
+        <button id="expand-all" type="button" class="secondary-button small-button">Expandir</button>
+        <button id="collapse-all" type="button" class="secondary-button small-button">Contraer</button>
+      </div>
+    </div>
+    <div id="task-history" class="task-history">
+      <div class="empty-state">Cargando historial…</div>
+    </div>
+  </section>
+</div>
+{% endblock %}
+{% block scripts %}
+<script src="/static/session.js" defer></script>
+{% endblock %}
