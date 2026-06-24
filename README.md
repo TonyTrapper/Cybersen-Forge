@@ -38,7 +38,7 @@ Cybersen Forge es una plataforma C2 desarrollada para el reto insignia **«Forja
                                  │ HTTPS / polling
                  ┌───────────────┴───────────────┐
                  ▼                               ▼
-       Linux implant                    Windows implant
+            Linux implant                 Windows implant
 ```
 
 Más detalles en [`docs/architecture.md`](docs/architecture.md).
