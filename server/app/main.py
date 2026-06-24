@@ -36,7 +36,7 @@ SESSION_TTL_HOURS = max(1, int(os.getenv("SESSION_TTL_HOURS", "12")))
 COOKIE_SECURE = os.getenv("COOKIE_SECURE", "false").lower() in {"1", "true", "yes"}
 
 BASE_DIR = Path(__file__).resolve().parent
-app = FastAPI(title=PROJECT_NAME, version="0.1.0", docs_url=None, redoc_url=None)
+app = FastAPI(title=PROJECT_NAME, version="0.2.0", docs_url=None, redoc_url=None)
 app.mount("/static", StaticFiles(directory=BASE_DIR / "static"), name="static")
 templates = Jinja2Templates(directory=BASE_DIR / "templates")
 
@@ -64,7 +64,7 @@ class EnrollResponse(BaseModel):
 class TaskPayload(BaseModel):
     id: int
     command: str
-    mode: Literal["host", "sandbox"] = "host"
+    mode: Literal["host", "shell", "sandbox"] = "host"
 
 
 class CheckinResponse(BaseModel):
@@ -90,7 +90,7 @@ class ResultRequest(BaseModel):
 
 class OperatorTaskRequest(BaseModel):
     command: str = Field(min_length=1, max_length=2048)
-    mode: Literal["host", "sandbox"] = "host"
+    mode: Literal["host", "shell", "sandbox"] = "host"
 
 
 class RenameAgentRequest(BaseModel):
@@ -261,12 +261,12 @@ def validate_operator_command(command: str, mode: str) -> str:
     stripped = command.strip()
     if not stripped:
         raise HTTPException(status_code=400, detail="Command cannot be empty")
-    maximum = 2048 if mode == "sandbox" else 512
+    maximum = 8192 if mode in {"shell", "sandbox"} else 512
     if len(stripped) > maximum:
         raise HTTPException(status_code=400, detail="Command is too long")
     if "\x00" in stripped or "\r" in stripped or "\n" in stripped:
         raise HTTPException(status_code=400, detail="Command contains invalid control characters")
-    return stripped if mode == "sandbox" else " ".join(stripped.split())
+    return stripped if mode in {"shell", "sandbox"} else " ".join(stripped.split())
 
 
 def serialize_task(task: sqlite3.Row) -> dict[str, Any]:
@@ -503,10 +503,10 @@ def operator_create_task(agent_id: str, payload: OperatorTaskRequest, forge_sess
         ).fetchone()
         if agent is None:
             raise HTTPException(status_code=404, detail="Agent not found")
-        if payload.mode == "sandbox" and not bool(agent["sandbox_available"]):
+        if payload.mode in {"shell", "sandbox"} and not bool(agent["sandbox_available"]):
             raise HTTPException(
                 status_code=409,
-                detail="This agent did not enroll with the isolated lab sandbox enabled",
+                detail="This agent did not enroll with the persistent isolated lab shell enabled",
             )
         cursor = conn.execute(
             "INSERT INTO tasks (agent_id, command, execution_mode, status, created_at) VALUES (?, ?, ?, 'pending', ?)",

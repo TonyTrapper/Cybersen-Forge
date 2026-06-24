@@ -6,6 +6,7 @@ const state = {
   tasks: [],
   filter: 'all',
   mode: 'host',
+  modeInitialized: false,
   openTasks: new Set(),
 };
 
@@ -19,13 +20,25 @@ const QUICK_COMMANDS = {
     'hostname', 'whoami', 'whoami /all', 'systeminfo',
     'ipconfig /all', 'tasklist /v', 'netstat -ano', 'route print',
   ],
-  sandbox: [
-    'pwd', 'ls -la', 'echo "Cybersen / TonyTrapper"',
-    'mkdir -p demo && printf "Cybersen Forge\\n" > demo/proof.txt && cat demo/proof.txt',
-    'find . -maxdepth 2 -type f -print',
+  shell: [
+    'pwd', 'ls -la', 'cd /tmp && pwd',
+    'export FORGE_DEMO=Cybersen && echo "$FORGE_DEMO"',
+    'mkdir -p /workspace/demo && printf "Cybersen Forge\\n" > /workspace/demo/proof.txt && cat /workspace/demo/proof.txt',
     'printf "alpha\\nbeta\\ngamma\\n" | grep beta',
   ],
 };
+
+function isShellMode(mode) {
+  return mode === 'shell' || mode === 'sandbox';
+}
+
+function displayMode(mode) {
+  return isShellMode(mode) ? 'shell' : 'system';
+}
+
+function promptForMode(mode) {
+  return isShellMode(mode) ? 'forge$' : 'system$';
+}
 
 function formatTimestamp(value) {
   if (!value) return '—';
@@ -61,56 +74,65 @@ function renderAgent() {
   document.querySelector('#detail-route').textContent = a.connection_type === 'direct' ? 'Directa' : `Vía ${a.parent_agent_id}`;
   document.querySelector('#detail-seen').textContent = Forge.relativeTime(a.age_seconds);
 
-  const sandboxButton = document.querySelector('#sandbox-mode-button');
-  const sandboxLabel = document.querySelector('#capability-sandbox');
+  const shellButton = document.querySelector('#shell-mode-button');
+  const shellLabel = document.querySelector('#capability-shell');
   if (a.sandbox_available) {
-    sandboxButton.disabled = false;
-    sandboxButton.title = '';
-    sandboxLabel.textContent = `Sandbox: ${a.sandbox_runtime || 'available'}`;
-    sandboxLabel.closest('.capability-item').classList.add('available');
+    shellButton.disabled = false;
+    shellButton.title = '';
+    shellLabel.textContent = `Shell: ${a.sandbox_runtime || 'available'}`;
+    shellLabel.closest('.capability-item').classList.add('available');
   } else {
-    sandboxButton.disabled = true;
-    sandboxButton.title = 'El agente no se enroló con FORGE_ENABLE_SANDBOX=true';
-    sandboxLabel.textContent = 'Sandbox: no disponible';
-    sandboxLabel.closest('.capability-item').classList.remove('available');
-    if (state.mode === 'sandbox') setMode('host');
+    shellButton.disabled = true;
+    shellButton.title = 'Inicia el agente con FORGE_ENABLE_SHELL=true y Podman o Docker disponible.';
+    shellLabel.textContent = 'Shell: no disponible';
+    shellLabel.closest('.capability-item').classList.remove('available');
+    if (state.mode === 'shell') setMode('host');
+  }
+
+  if (!state.modeInitialized) {
+    setMode(a.sandbox_available ? 'shell' : 'host');
+    state.modeInitialized = true;
   }
 }
 
 function renderQuickCommands() {
   const container = document.querySelector('#quick-commands');
-  const commands = state.mode === 'sandbox'
-    ? QUICK_COMMANDS.sandbox
+  const commands = state.mode === 'shell'
+    ? QUICK_COMMANDS.shell
     : (state.agent?.os === 'windows' ? QUICK_COMMANDS.windows : QUICK_COMMANDS.linux);
-  container.innerHTML = commands.map(command =>
-    `<button type="button" data-command="${Forge.escape(command)}">${Forge.escape(command)}</button>`
-  ).join('');
-  container.querySelectorAll('button').forEach(button => {
+  container.innerHTML = '';
+  commands.forEach(command => {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.textContent = command;
     button.addEventListener('click', () => {
       const input = document.querySelector('#command-input');
-      input.value = button.dataset.command;
+      input.value = command;
       input.focus();
     });
+    container.appendChild(button);
   });
 }
 
 function setMode(mode) {
-  if (mode === 'sandbox' && !state.agent?.sandbox_available) return;
+  if (mode === 'shell' && !state.agent?.sandbox_available) return;
   state.mode = mode;
   document.querySelectorAll('.mode-button').forEach(button => {
-    button.classList.toggle('active', button.dataset.mode === mode);
+    const active = button.dataset.mode === mode;
+    button.classList.toggle('active', active);
+    button.setAttribute('aria-selected', active ? 'true' : 'false');
   });
   const input = document.querySelector('#command-input');
   const prompt = document.querySelector('#terminal-prompt');
   const description = document.querySelector('#mode-description');
-  if (mode === 'sandbox') {
-    prompt.textContent = 'sandbox$';
-    input.placeholder = 'echo "Cybersen" && ls -la';
-    description.textContent = 'Comandos libres dentro de un contenedor efímero aislado, sin red y con recursos limitados.';
+  if (mode === 'shell') {
+    prompt.textContent = 'forge$';
+    input.placeholder = 'cd /workspace && ls -la';
+    description.textContent = 'Shell persistente del laboratorio: conserva directorio, variables, pipes y redirecciones dentro del runtime aislado.';
   } else {
-    prompt.textContent = 'host$';
+    prompt.textContent = 'system$';
     input.placeholder = state.agent?.os === 'windows' ? 'systeminfo' : 'hostname';
-    description.textContent = `Diagnóstico ${state.agent?.os === 'windows' ? 'Windows' : 'Linux'} mediante módulos auditables y salida estructurada.`;
+    description.textContent = `Vista del sistema ${state.agent?.os === 'windows' ? 'Windows' : 'Linux'} mediante tareas de diagnóstico del host.`;
   }
   renderQuickCommands();
   input.focus();
@@ -119,9 +141,9 @@ function setMode(mode) {
 function renderTerminal() {
   const terminal = document.querySelector('#terminal-transcript');
   const wasNearBottom = terminal.scrollHeight - terminal.scrollTop - terminal.clientHeight < 80;
-  const items = [...state.tasks].reverse().slice(-40);
+  const items = [...state.tasks].reverse().slice(-60);
   if (!items.length) {
-    terminal.innerHTML = '<div class="terminal-welcome"><strong>Cybersen Forge session console</strong><span>Selecciona un modo y envía una tarea.</span></div>';
+    terminal.innerHTML = '<div class="terminal-welcome"><strong>Cybersen Forge session console</strong><span>Abre Shell para trabajar en el laboratorio persistente o System para consultar el host.</span></div>';
     return;
   }
   terminal.innerHTML = items.map(task => {
@@ -133,9 +155,9 @@ function renderTerminal() {
     return `
       <div class="terminal-entry ${Forge.escape(task.status)}">
         <div class="terminal-entry-command">
-          <span class="terminal-entry-prompt">${task.mode === 'sandbox' ? 'sandbox$' : 'host$'}</span>
+          <span class="terminal-entry-prompt">${promptForMode(task.mode)}</span>
           <code>${Forge.escape(task.command)}</code>
-          <span class="terminal-mode-badge">${Forge.escape(task.mode)}</span>
+          <span class="terminal-mode-badge">${displayMode(task.mode)}</span>
         </div>
         ${waiting
           ? `<div class="terminal-wait"><span class="spinner"></span>${Forge.escape(statusText(task))}</div>`
@@ -163,7 +185,7 @@ function renderTasks() {
       <article class="task-card${open}" data-task-id="${task.id}">
         <button class="task-summary" type="button" aria-expanded="${open ? 'true' : 'false'}">
           <span class="task-command">
-            <code>${task.mode === 'sandbox' ? 'sandbox$' : 'host$'} ${Forge.escape(task.command)}</code>
+            <code>${promptForMode(task.mode)} ${Forge.escape(task.command)}</code>
             <small>Task #${task.id} · ${Forge.escape(formatTimestamp(task.created_at))}</small>
           </span>
           <span class="status-badge ${Forge.escape(task.status)}">${Forge.escape(task.status)}</span>
@@ -171,7 +193,7 @@ function renderTasks() {
         </button>
         <div class="task-output">
           <div class="output-toolbar">
-            <span class="output-label">stdout</span>
+            <span class="output-label">output</span>
             <button type="button" class="copy-output" data-copy="stdout">Copiar</button>
           </div>
           <pre class="output-block" data-output="stdout">${Forge.escape(stdout)}</pre>
@@ -246,7 +268,7 @@ async function submitCommand(event) {
     });
     input.value = '';
     feedback.className = 'command-feedback success';
-    feedback.textContent = `Task #${task.id} creada en modo ${task.mode}.`;
+    feedback.textContent = `Task #${task.id} creada en modo ${displayMode(task.mode)}.`;
     await refresh();
   } catch (error) {
     feedback.className = 'command-feedback error';
@@ -258,9 +280,24 @@ async function submitCommand(event) {
 }
 
 window.addEventListener('DOMContentLoaded', () => {
-  document.querySelector('#command-form').addEventListener('submit', submitCommand);
+  const form = document.querySelector('#command-form');
+  const input = document.querySelector('#command-input');
+  form.addEventListener('submit', submitCommand);
+  input.addEventListener('keydown', event => {
+    if (event.key === 'Enter' && !event.shiftKey) {
+      event.preventDefault();
+      form.requestSubmit();
+    }
+  });
+  input.addEventListener('input', () => {
+    input.style.height = 'auto';
+    input.style.height = `${Math.min(input.scrollHeight, 180)}px`;
+  });
   document.querySelectorAll('.mode-button').forEach(button => {
-    button.addEventListener('click', () => setMode(button.dataset.mode));
+    button.addEventListener('click', () => {
+      state.modeInitialized = true;
+      setMode(button.dataset.mode);
+    });
   });
   document.querySelector('#task-filter').addEventListener('change', event => {
     state.filter = event.target.value;

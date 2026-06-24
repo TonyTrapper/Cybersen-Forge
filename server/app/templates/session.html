@@ -30,33 +30,33 @@
   <section class="panel terminal-panel">
     <div class="panel-header terminal-toolbar">
       <div>
-        <p class="eyebrow">SESSION TASK TERMINAL</p>
+        <p class="eyebrow">SESSION CONSOLE</p>
         <h2>Consola operativa</h2>
-        <p id="mode-description">Diagnóstico del host mediante módulos auditables.</p>
+        <p id="mode-description">Inicializando la sesión.</p>
       </div>
-      <div class="mode-switch" role="group" aria-label="Modo de ejecución">
-        <button type="button" class="mode-button active" data-mode="host">Host</button>
-        <button type="button" class="mode-button" data-mode="sandbox" id="sandbox-mode-button">Sandbox</button>
+      <div class="mode-switch" role="tablist" aria-label="Vista de sesión">
+        <button type="button" class="mode-button" data-mode="shell" id="shell-mode-button" role="tab">Shell</button>
+        <button type="button" class="mode-button" data-mode="host" role="tab">System</button>
       </div>
     </div>
 
     <div class="capability-strip">
-      <span class="capability-item"><span class="capability-dot"></span><strong id="capability-host">Host modules</strong></span>
-      <span class="capability-item"><span class="capability-dot"></span><strong id="capability-sandbox">Sandbox: comprobando…</strong></span>
-      <span class="capability-note">El modo sandbox admite comandos libres dentro de un contenedor aislado sin red ni acceso general al host.</span>
+      <span class="capability-item available"><span class="capability-dot"></span><strong id="capability-host">System diagnostics</strong></span>
+      <span class="capability-item"><span class="capability-dot"></span><strong id="capability-shell">Shell: comprobando…</strong></span>
+      <span class="capability-note">Shell conserva directorio, variables y estado dentro del laboratorio aislado de la sesión.</span>
     </div>
 
     <div id="terminal-transcript" class="terminal-transcript" aria-live="polite">
       <div class="terminal-welcome">
         <strong>Cybersen Forge session console</strong>
-        <span>Selecciona un modo y envía una tarea.</span>
+        <span>La vista Shell se abre por defecto cuando el agente dispone del runtime aislado.</span>
       </div>
     </div>
 
     <form id="command-form" class="command-form terminal-command-form">
       <div class="terminal-input terminal-input-large">
-        <span class="terminal-prompt" id="terminal-prompt">host$</span>
-        <input id="command-input" autocomplete="off" spellcheck="false" placeholder="hostname" maxlength="2048" required>
+        <span class="terminal-prompt" id="terminal-prompt">forge$</span>
+        <textarea id="command-input" autocomplete="off" spellcheck="false" placeholder="pwd" maxlength="8192" rows="1" required></textarea>
         <button class="primary-button" type="submit">Ejecutar</button>
       </div>
     </form>
@@ -69,7 +69,7 @@
     <div class="panel-header toolbar">
       <div>
         <h2>Historial de tareas</h2>
-        <p>Los resultados abiertos permanecen abiertos durante las actualizaciones.</p>
+        <p>Los resultados permanecen disponibles y los paneles abiertos conservan su estado.</p>
       </div>
       <div class="history-actions">
         <select id="task-filter" class="compact-select">

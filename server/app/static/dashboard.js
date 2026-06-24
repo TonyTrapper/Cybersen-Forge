@@ -31,7 +31,7 @@ function renderSessions() {
       <td>${Forge.escape(item.username)}</td>
       <td>
         <span class="platform-tag">${Forge.escape(Forge.platformLabel(item.os, item.arch))}</span>
-        ${item.sandbox_available ? `<span class="sandbox-mini">sandbox</span>` : ''}
+        ${item.sandbox_available ? `<span class="shell-mini">shell</span>` : ''}
       </td>
       <td><span class="route-tag">${Forge.escape(item.connection_type === 'direct' ? item.remote_ip : `vía ${item.parent_agent_id}`)}</span></td>
       <td>${Forge.escape(Forge.relativeTime(item.age_seconds))}</td>

@@ -1,9 +1,53 @@
 package main
 
 import (
+	"os"
+	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
+	"time"
 )
+
+func TestPersistentShellKeepsState(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("helper runtime uses a POSIX shell")
+	}
+	temporary := t.TempDir()
+	fakeRuntime := filepath.Join(temporary, "fake-container-runtime")
+	script := `#!/bin/sh
+if [ "$1" = "rm" ]; then
+  exit 0
+fi
+exec /bin/sh
+`
+	if err := os.WriteFile(fakeRuntime, []byte(script), 0700); err != nil {
+		t.Fatal(err)
+	}
+	originalTimeout := commandTimeout
+	commandTimeout = 3 * time.Second
+	defer func() { commandTimeout = originalTimeout }()
+
+	config := sandboxConfig{
+		Enabled: true, Available: true, Runtime: fakeRuntime,
+		Image: "test", Workspace: temporary,
+	}
+	shell := newPersistentShell(config, "agt_test")
+	defer shell.Close()
+
+	if result := shell.Run("cd /tmp"); result.ExitCode != 0 {
+		t.Fatalf("cd failed: %#v", result)
+	}
+	if result := shell.Run("pwd"); result.ExitCode != 0 || strings.TrimSpace(result.Stdout) != "/tmp" {
+		t.Fatalf("working directory was not preserved: %#v", result)
+	}
+	if result := shell.Run("export FORGE_TEST=Cybersen"); result.ExitCode != 0 {
+		t.Fatalf("export failed: %#v", result)
+	}
+	if result := shell.Run(`printf "%s" "$FORGE_TEST"`); result.ExitCode != 0 || result.Stdout != "Cybersen" {
+		t.Fatalf("environment was not preserved: %#v", result)
+	}
+}
 
 func TestAllowedHostCommands(t *testing.T) {
 	commands := []string{
@@ -66,15 +110,15 @@ func TestSandboxArgumentsAreIsolated(t *testing.T) {
 	config := sandboxConfig{
 		Runtime: "podman", Image: "alpine:3.20", Workspace: "/tmp/cybersen-forge-workspace",
 	}
-	args := sandboxArguments(config, `echo ok && ls -la`)
+	args := sandboxShellArguments(config, "cybersen-forge-shell-test")
 	joined := strings.Join(args, " ")
-	for _, required := range []string{"--network=none", "--read-only", "--cap-drop=all", "--security-opt=no-new-privileges", "/bin/sh -lc"} {
+	for _, required := range []string{"--network=none", "--read-only", "--cap-drop=all", "--security-opt=no-new-privileges", "--name cybersen-forge-shell-test", "/bin/sh"} {
 		if !strings.Contains(joined, required) {
 			t.Fatalf("sandbox arguments missing %q: %s", required, joined)
 		}
 	}
-	if args[len(args)-1] != `echo ok && ls -la` {
-		t.Fatalf("sandbox command was not passed as one argument: %#v", args)
+	if args[len(args)-1] != "/bin/sh" {
+		t.Fatalf("persistent shell entrypoint is incorrect: %#v", args)
 	}
 }
 

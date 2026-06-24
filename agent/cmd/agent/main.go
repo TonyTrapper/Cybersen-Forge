@@ -16,11 +16,12 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 	"unicode"
 )
 
-const agentVersion = "0.1.0"
+const agentVersion = "0.2.0"
 
 var (
 	defaultCheckinInterval = 1 * time.Second
@@ -112,6 +113,12 @@ func main() {
 		fmt.Printf("[+] loaded identity %s\n", ident.AgentID)
 	}
 
+	var shell *persistentShell
+	if sandbox.Available {
+		shell = newPersistentShell(sandbox, ident.AgentID)
+		defer shell.Close()
+	}
+
 	client := &http.Client{Timeout: 25 * time.Second}
 	interval := defaultCheckinInterval
 	for {
@@ -126,7 +133,7 @@ func main() {
 		}
 		if response.Task != nil {
 			fmt.Printf("[>] task #%d (%s): %s\n", response.Task.ID, response.Task.Mode, response.Task.Command)
-			result := executeTask(*response.Task, sandbox)
+			result := executeTask(*response.Task, sandbox, shell)
 			if err := submitResult(client, serverURL, ident, response.Task.ID, result); err != nil {
 				fmt.Fprintf(os.Stderr, "[-] result submission error: %v\n", err)
 			} else {
@@ -221,13 +228,13 @@ type sandboxConfig struct {
 
 func discoverSandbox() sandboxConfig {
 	config := sandboxConfig{
-		Enabled: strings.EqualFold(getenv("FORGE_ENABLE_SANDBOX", "false"), "true"),
-		Image:   getenv("FORGE_SANDBOX_IMAGE", "alpine:3.20"),
+		Enabled: strings.EqualFold(getenv("FORGE_ENABLE_SHELL", getenv("FORGE_ENABLE_SANDBOX", "false")), "true"),
+		Image:   getenv("FORGE_SHELL_IMAGE", getenv("FORGE_SANDBOX_IMAGE", "alpine:3.20")),
 	}
 	if !config.Enabled || runtime.GOOS != "linux" {
 		return config
 	}
-	workspace := os.Getenv("FORGE_SANDBOX_WORKSPACE")
+	workspace := getenv("FORGE_SHELL_WORKSPACE", os.Getenv("FORGE_SANDBOX_WORKSPACE"))
 	if workspace == "" {
 		home, err := os.UserHomeDir()
 		if err == nil {
@@ -235,7 +242,23 @@ func discoverSandbox() sandboxConfig {
 		}
 	}
 	config.Workspace = workspace
-	for _, candidate := range []string{"podman", "docker"} {
+	candidates := []string{}
+	if preferred := strings.TrimSpace(os.Getenv("FORGE_SHELL_RUNTIME")); preferred != "" {
+		candidates = append(candidates, preferred)
+	}
+	for _, fallback := range []string{"podman", "docker"} {
+		alreadyAdded := false
+		for _, candidate := range candidates {
+			if candidate == fallback {
+				alreadyAdded = true
+				break
+			}
+		}
+		if !alreadyAdded {
+			candidates = append(candidates, fallback)
+		}
+	}
+	for _, candidate := range candidates {
 		if _, err := exec.LookPath(candidate); err == nil {
 			config.Runtime = candidate
 			config.Available = workspace != ""
@@ -245,75 +268,191 @@ func discoverSandbox() sandboxConfig {
 	return config
 }
 
-func executeTask(current task, sandbox sandboxConfig) resultRequest {
+func executeTask(current task, sandbox sandboxConfig, shell *persistentShell) resultRequest {
 	switch current.Mode {
 	case "", "host":
 		return executeCommand(current.Command)
-	case "sandbox":
-		return executeSandboxCommand(current.Command, sandbox)
+	case "shell", "sandbox":
+		if shell == nil {
+			return resultRequest{Stderr: "lab shell unavailable; enable FORGE_ENABLE_SHELL=true and install Podman or Docker", ExitCode: 127}
+		}
+		return shell.Run(current.Command)
 	default:
 		return resultRequest{Stderr: "unsupported task mode", ExitCode: 2}
 	}
 }
 
-func executeSandboxCommand(command string, sandbox sandboxConfig) resultRequest {
-	if !sandbox.Enabled {
-		return resultRequest{Stderr: "sandbox mode is disabled on this agent; set FORGE_ENABLE_SANDBOX=true", ExitCode: 126}
-	}
-	if !sandbox.Available || sandbox.Runtime == "" {
-		return resultRequest{Stderr: "sandbox runtime unavailable; install rootless Podman or Docker", ExitCode: 127}
-	}
-	if strings.ContainsAny(command, "\x00\r\n") || strings.TrimSpace(command) == "" {
-		return resultRequest{Stderr: "invalid sandbox command", ExitCode: 2}
-	}
-	if err := os.MkdirAll(sandbox.Workspace, 0700); err != nil {
-		return resultRequest{Stderr: "could not create sandbox workspace: " + err.Error(), ExitCode: 1}
-	}
+type persistentShell struct {
+	mu            sync.Mutex
+	config        sandboxConfig
+	containerName string
+	cmd           *exec.Cmd
+	stdin         io.WriteCloser
+	reader        *bufio.Reader
+}
 
-	ctx, cancel := context.WithTimeout(context.Background(), commandTimeout)
-	defer cancel()
-	started := time.Now()
-	args := sandboxArguments(sandbox, command)
-	cmd := exec.CommandContext(ctx, sandbox.Runtime, args...)
-	cmd.Env = safeEnvironment()
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-	err := cmd.Run()
-	duration := time.Since(started).Milliseconds()
+type shellReadResult struct {
+	output   string
+	exitCode int
+	err      error
+}
 
-	exitCode := 0
-	timedOut := false
-	if err != nil {
-		exitCode = 1
-		var exitErr *exec.ExitError
-		if errors.As(err, &exitErr) {
-			exitCode = exitErr.ExitCode()
-		}
-		if ctx.Err() == context.DeadlineExceeded {
-			stderr.WriteString("\nsandbox command timed out")
-			exitCode = 124
-			timedOut = true
-		}
+func newPersistentShell(config sandboxConfig, agentID string) *persistentShell {
+	suffix := strings.ReplaceAll(agentID, "_", "-")
+	if len(suffix) > 28 {
+		suffix = suffix[len(suffix)-28:]
 	}
-	return resultRequest{
-		Stdout: truncate(stdout.String()), Stderr: truncate(stderr.String()),
-		ExitCode: exitCode, DurationMS: duration, TimedOut: timedOut,
+	return &persistentShell{
+		config:        config,
+		containerName: "cybersen-forge-shell-" + suffix,
 	}
 }
 
-func sandboxArguments(sandbox sandboxConfig, command string) []string {
+func (s *persistentShell) Run(command string) resultRequest {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if strings.TrimSpace(command) == "" || strings.ContainsRune(command, '\x00') {
+		return resultRequest{Stderr: "invalid shell command", ExitCode: 2}
+	}
+	if err := os.MkdirAll(s.config.Workspace, 0700); err != nil {
+		return resultRequest{Stderr: "could not create shell workspace: " + err.Error(), ExitCode: 1}
+	}
+	if err := s.ensureStarted(); err != nil {
+		return resultRequest{Stderr: "could not start lab shell: " + err.Error(), ExitCode: 127}
+	}
+
+	marker := fmt.Sprintf("__FORGE_DONE_%d__", time.Now().UnixNano())
+	started := time.Now()
+	payload := command
+	if !strings.HasSuffix(payload, "\n") {
+		payload += "\n"
+	}
+	payload += fmt.Sprintf("printf '\\n%s:%%s\\n' \"$?\"\n", marker)
+	if _, err := io.WriteString(s.stdin, payload); err != nil {
+		s.reset()
+		return resultRequest{Stderr: "shell write failed: " + err.Error(), ExitCode: 1}
+	}
+
+	resultChannel := make(chan shellReadResult, 1)
+	go func() {
+		resultChannel <- readUntilShellMarker(s.reader, marker)
+	}()
+
+	timer := time.NewTimer(commandTimeout)
+	defer timer.Stop()
+	select {
+	case read := <-resultChannel:
+		duration := time.Since(started).Milliseconds()
+		if read.err != nil {
+			s.reset()
+			return resultRequest{
+				Stdout: truncate(read.output), Stderr: read.err.Error(),
+				ExitCode: read.exitCode, DurationMS: duration,
+			}
+		}
+		return resultRequest{
+			Stdout: truncate(read.output), ExitCode: read.exitCode,
+			DurationMS: duration,
+		}
+	case <-timer.C:
+		duration := time.Since(started).Milliseconds()
+		s.reset()
+		return resultRequest{
+			Stderr:   "shell command timed out; the isolated shell was restarted",
+			ExitCode: 124, DurationMS: duration, TimedOut: true,
+		}
+	}
+}
+
+func (s *persistentShell) ensureStarted() error {
+	if s.cmd != nil && s.cmd.Process != nil && s.cmd.ProcessState == nil {
+		return nil
+	}
+	_ = exec.Command(s.config.Runtime, "rm", "-f", s.containerName).Run()
+	args := sandboxShellArguments(s.config, s.containerName)
+	cmd := exec.Command(s.config.Runtime, args...)
+	cmd.Env = safeEnvironment()
+	stdin, err := cmd.StdinPipe()
+	if err != nil {
+		return err
+	}
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		_ = stdin.Close()
+		return err
+	}
+	cmd.Stderr = cmd.Stdout
+	if err := cmd.Start(); err != nil {
+		_ = stdin.Close()
+		return err
+	}
+	s.cmd = cmd
+	s.stdin = stdin
+	s.reader = bufio.NewReaderSize(stdout, 256*1024)
+	return nil
+}
+
+func (s *persistentShell) reset() {
+	if s.stdin != nil {
+		_ = s.stdin.Close()
+	}
+	if s.cmd != nil && s.cmd.Process != nil {
+		_ = s.cmd.Process.Kill()
+		_, _ = s.cmd.Process.Wait()
+	}
+	if s.config.Runtime != "" && s.containerName != "" {
+		_ = exec.Command(s.config.Runtime, "rm", "-f", s.containerName).Run()
+	}
+	s.cmd = nil
+	s.stdin = nil
+	s.reader = nil
+}
+
+func (s *persistentShell) Close() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.reset()
+}
+
+func readUntilShellMarker(reader *bufio.Reader, marker string) shellReadResult {
+	var output strings.Builder
+	prefix := marker + ":"
+	for {
+		line, err := reader.ReadString('\n')
+		trimmed := strings.TrimRight(line, "\r\n")
+		if strings.HasPrefix(trimmed, prefix) {
+			exitCode, parseErr := strconv.Atoi(strings.TrimSpace(strings.TrimPrefix(trimmed, prefix)))
+			if parseErr != nil {
+				return shellReadResult{output: strings.TrimSuffix(output.String(), "\n"), exitCode: 1, err: errors.New("invalid shell completion marker")}
+			}
+			return shellReadResult{output: strings.TrimSuffix(output.String(), "\n"), exitCode: exitCode}
+		}
+		if line != "" {
+			output.WriteString(line)
+		}
+		if err != nil {
+			if errors.Is(err, io.EOF) {
+				return shellReadResult{output: strings.TrimSuffix(output.String(), "\n"), exitCode: 1, err: errors.New("isolated shell exited before completing the command")}
+			}
+			return shellReadResult{output: strings.TrimSuffix(output.String(), "\n"), exitCode: 1, err: err}
+		}
+	}
+}
+
+func sandboxShellArguments(sandbox sandboxConfig, containerName string) []string {
 	volume := sandbox.Workspace + ":/workspace:rw"
 	if sandbox.Runtime == "podman" {
 		volume += ",Z"
 	}
 	return []string{
-		"run", "--rm", "--network=none", "--read-only",
+		"run", "--rm", "-i", "--name", containerName,
+		"--network=none", "--read-only",
 		"--cap-drop=all", "--security-opt=no-new-privileges",
 		"--pids-limit=128", "--memory=256m", "--cpus=0.50",
 		"--tmpfs", "/tmp:rw,nosuid,nodev,size=64m",
 		"-v", volume, "-w", "/workspace",
-		sandbox.Image, "/bin/sh", "-lc", command,
+		sandbox.Image, "/bin/sh",
 	}
 }
 
