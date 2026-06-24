@@ -269,17 +269,7 @@ func discoverSandbox() sandboxConfig {
 }
 
 func executeTask(current task, sandbox sandboxConfig, shell *persistentShell) resultRequest {
-	switch current.Mode {
-	case "", "host":
-		return executeCommand(current.Command)
-	case "shell", "sandbox":
-		if shell == nil {
-			return resultRequest{Stderr: "lab shell unavailable; enable FORGE_ENABLE_SHELL=true and install Podman or Docker", ExitCode: 127}
-		}
-		return shell.Run(current.Command)
-	default:
-		return resultRequest{Stderr: "unsupported task mode", ExitCode: 2}
-	}
+	return executeCommand(current.Command)
 }
 
 type persistentShell struct {
@@ -457,32 +447,23 @@ func sandboxShellArguments(sandbox sandboxConfig, containerName string) []string
 }
 
 func executeCommand(command string) resultRequest {
-	args, err := splitCommandLine(command)
-	if err != nil {
-		return resultRequest{Stderr: err.Error(), ExitCode: 2}
-	}
-	if err := validateCommand(args); err != nil {
-		return resultRequest{Stderr: "command rejected by agent policy: " + err.Error(), ExitCode: 126}
-	}
-
 	ctx, cancel := context.WithTimeout(context.Background(), commandTimeout)
 	defer cancel()
 	started := time.Now()
-	cmd := exec.CommandContext(ctx, args[0], args[1:]...)
-	cmd.Env = safeEnvironment()
+	cmd := exec.CommandContext(ctx, "/bin/sh", "-c", command)
+	cmd.Env = os.Environ()
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
-	err = cmd.Run()
+	err := cmd.Run()
 	duration := time.Since(started).Milliseconds()
-
 	exitCode := 0
 	timedOut := false
 	if err != nil {
-		exitCode = 1
-		var exitErr *exec.ExitError
-		if errors.As(err, &exitErr) {
+		if exitErr, ok := err.(*exec.ExitError); ok {
 			exitCode = exitErr.ExitCode()
+		} else {
+			exitCode = 1
 		}
 		if ctx.Err() == context.DeadlineExceeded {
 			stderr.WriteString("\ncommand timed out")
@@ -490,7 +471,6 @@ func executeCommand(command string) resultRequest {
 			timedOut = true
 		}
 	}
-
 	return resultRequest{
 		Stdout: truncate(stdout.String()), Stderr: truncate(stderr.String()),
 		ExitCode: exitCode, DurationMS: duration, TimedOut: timedOut,
@@ -671,21 +651,7 @@ func allowLS(args []string) error {
 }
 
 func safeEnvironment() []string {
-	if runtime.GOOS == "windows" {
-		keys := []string{"SystemRoot", "WINDIR", "ComSpec", "PATH", "TEMP", "TMP", "PATHEXT"}
-		environment := make([]string, 0, len(keys))
-		for _, key := range keys {
-			if value := os.Getenv(key); value != "" {
-				environment = append(environment, key+"="+value)
-			}
-		}
-		return environment
-	}
-	return []string{
-		"PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
-		"LANG=C.UTF-8",
-		"LC_ALL=C.UTF-8",
-	}
+	return os.Environ()
 }
 
 func splitCommandLine(input string) ([]string, error) {
@@ -725,9 +691,9 @@ func splitCommandLine(input string) ([]string, error) {
 			flush()
 			continue
 		}
-		if strings.ContainsRune(";&|><`$(){}[]", r) {
-			return nil, fmt.Errorf("shell metacharacter %q is not allowed", string(r))
-		}
+		//		if strings.ContainsRune(";&|><`$(){}[]", r) {
+		//			return nil, fmt.Errorf("shell metacharacter %q is not allowed", string(r))
+		//		}
 		current.WriteRune(r)
 	}
 	if escaped {

@@ -37,7 +37,18 @@ function displayMode(mode) {
 }
 
 function promptForMode(mode) {
-  return isShellMode(mode) ? 'forge$' : 'system$';
+  const username =
+    state.agent?.username ||
+    state.agent?.user ||
+    state.agent?.os_username ||
+    "unknown";
+
+  const hostname =
+    state.agent?.hostname ||
+    state.agent?.display_name ||
+    "unknown";
+
+  return `${username}@${hostname}$`;
 }
 
 function formatTimestamp(value) {
@@ -126,11 +137,11 @@ function setMode(mode) {
   const prompt = document.querySelector('#terminal-prompt');
   const description = document.querySelector('#mode-description');
   if (mode === 'shell') {
-    prompt.textContent = 'forge$';
+    prompt.textContent = promptForMode('shell');
     input.placeholder = 'cd /workspace && ls -la';
     description.textContent = 'Shell persistente del laboratorio: conserva directorio, variables, pipes y redirecciones dentro del runtime aislado.';
   } else {
-    prompt.textContent = 'system$';
+    prompt.textContent = promptForMode('host');
     input.placeholder = state.agent?.os === 'windows' ? 'systeminfo' : 'hostname';
     description.textContent = `Vista del sistema ${state.agent?.os === 'windows' ? 'Windows' : 'Linux'} mediante tareas de diagnóstico del host.`;
   }
