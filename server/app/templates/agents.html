@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+{% block title %}Agentes · {{ project_name }}{% endblock %}
+{% block heading %}Distribución de agentes{% endblock %}
+{% block content %}
+<section class="panel artifacts-hero">
+  <div>
+    <p class="eyebrow">AGENT DELIVERY</p>
+    <h2>Descarga y enrolamiento</h2>
+    <p>Genera un comando listo para copiar con la URL del servidor y una credencial temporal de un solo uso.</p>
+  </div>
+  <div class="server-url-box">
+    <label for="server-url">URL alcanzable por el target</label>
+    <div class="server-url-row">
+      <input id="server-url" type="url" autocomplete="off" spellcheck="false" placeholder="https://forge.example.com">
+      <button id="use-current-url" class="secondary-button" type="button">Usar URL actual</button>
+    </div>
+    <small>Se detecta desde la dirección con la que abriste el panel. Puedes cambiarla por una IP privada, IP pública o dominio.</small>
+  </div>
+</section>
+
+<section class="artifact-grid" id="artifact-grid">
+  <div class="empty-state panel">Cargando artefactos…</div>
+</section>
+
+<section class="panel enrollment-help">
+  <div class="panel-header">
+    <div>
+      <p class="eyebrow">ENROLLMENT FLOW</p>
+      <h2>Qué hace el comando</h2>
+    </div>
+  </div>
+  <div class="flow-grid">
+    <article><strong>1</strong><span>Descarga el binario desde este mismo servidor Forge.</span></article>
+    <article><strong>2</strong><span>Usa un token temporal limitado a la plataforma seleccionada.</span></article>
+    <article><strong>3</strong><span>El agente se enrola y recibe su credencial individual permanente.</span></article>
+    <article><strong>4</strong><span>El token temporal queda consumido después del enrolamiento.</span></article>
+  </div>
+</section>
+
+<div id="artifact-feedback" class="command-feedback" aria-live="polite"></div>
+{% endblock %}
+{% block scripts %}
+<script src="/static/agents.js" defer></script>
+{% endblock %}

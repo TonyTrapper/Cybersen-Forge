@@ -31,62 +31,28 @@
     <div class="panel-header terminal-toolbar">
       <div>
         <p class="eyebrow">SESSION CONSOLE</p>
-        <h2>Consola operativa</h2>
-        <p id="mode-description">Inicializando la sesión.</p>
+        <h2>Ejecutar comandos</h2>
+        <p>Envía comandos al agente seleccionado y consulta su salida en tiempo real.</p>
       </div>
-      <div class="mode-switch" role="tablist" aria-label="Vista de sesión">
-        <button type="button" class="mode-button" data-mode="shell" id="shell-mode-button" role="tab">Shell</button>
-        <button type="button" class="mode-button" data-mode="host" role="tab">System</button>
-      </div>
-    </div>
-
-    <div class="capability-strip">
-      <span class="capability-item available"><span class="capability-dot"></span><strong id="capability-host">System diagnostics</strong></span>
-      <span class="capability-item"><span class="capability-dot"></span><strong id="capability-shell">Shell: comprobando…</strong></span>
-      <span class="capability-note">Shell conserva directorio, variables y estado dentro del laboratorio aislado de la sesión.</span>
     </div>
 
     <div id="terminal-transcript" class="terminal-transcript" aria-live="polite">
       <div class="terminal-welcome">
         <strong>Cybersen Forge session console</strong>
-        <span>La vista Shell se abre por defecto cuando el agente dispone del runtime aislado.</span>
+        <span>Selecciona un comando rápido o escribe uno para ejecutarlo en el agente.</span>
       </div>
     </div>
 
     <form id="command-form" class="command-form terminal-command-form">
       <div class="terminal-input terminal-input-large">
         <span class="terminal-prompt" id="terminal-prompt">conectando...</span>
-        <textarea id="command-input" autocomplete="off" spellcheck="false" placeholder="pwd" maxlength="8192" rows="1" required></textarea>
+        <textarea id="command-input" autocomplete="off" spellcheck="false" placeholder="hostname" maxlength="8192" rows="1" required></textarea>
         <button class="primary-button" type="submit">Ejecutar</button>
       </div>
     </form>
 
     <div class="quick-commands" id="quick-commands"></div>
     <div id="command-feedback" class="command-feedback" aria-live="polite"></div>
-  </section>
-
-  <section class="panel history-panel">
-    <div class="panel-header toolbar">
-      <div>
-        <h2>Historial de tareas</h2>
-        <p>Los resultados permanecen disponibles y los paneles abiertos conservan su estado.</p>
-      </div>
-      <div class="history-actions">
-        <select id="task-filter" class="compact-select">
-          <option value="all">Todos</option>
-          <option value="pending">Pending</option>
-          <option value="dispatched">Dispatched</option>
-          <option value="completed">Completed</option>
-          <option value="failed">Failed</option>
-          <option value="cancelled">Cancelled</option>
-        </select>
-        <button id="expand-all" type="button" class="secondary-button small-button">Expandir</button>
-        <button id="collapse-all" type="button" class="secondary-button small-button">Contraer</button>
-      </div>
-    </div>
-    <div id="task-history" class="task-history">
-      <div class="empty-state">Cargando historial…</div>
-    </div>
   </section>
 </div>
 {% endblock %}

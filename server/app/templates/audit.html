@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+{% block title %}Auditoría · {{ project_name }}{% endblock %}
+{% block heading %}Auditoría{% endblock %}
+{% block content %}
+<section class="panel page-hero audit-hero">
+  <div>
+    <p class="eyebrow">TASK AUDIT</p>
+    <h2>Historial global de tareas</h2>
+    <p>Consulta comandos, agente de origen, estado, salida y tiempos de ejecución.</p>
+  </div>
+  <div class="audit-filters">
+    <select id="audit-agent" class="compact-select">
+      <option value="">Todos los agentes</option>
+    </select>
+    <select id="audit-status" class="compact-select">
+      <option value="">Todos los estados</option>
+      <option value="pending">Pending</option>
+      <option value="dispatched">Dispatched</option>
+      <option value="completed">Completed</option>
+      <option value="failed">Failed</option>
+      <option value="cancelled">Cancelled</option>
+    </select>
+    <button id="audit-refresh" class="secondary-button" type="button">Actualizar</button>
+  </div>
+</section>
+
+<section class="panel audit-panel">
+  <div id="audit-task-list" class="task-history">
+    <div class="empty-state">Cargando historial…</div>
+  </div>
+</section>
+{% endblock %}
+{% block scripts %}
+<script src="/static/audit.js" defer></script>
+{% endblock %}

@@ -8,12 +8,15 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"os/user"
 	"path/filepath"
 	"runtime"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -21,7 +24,7 @@ import (
 	"unicode"
 )
 
-const agentVersion = "0.2.0"
+const agentVersion = "0.3.0"
 
 var (
 	defaultCheckinInterval = 1 * time.Second
@@ -29,21 +32,42 @@ var (
 	maxOutputBytes         = 65536
 )
 
+type networkInfo struct {
+	Interface string `json:"interface"`
+	Address   string `json:"address"`
+	Network   string `json:"network"`
+}
+
+type pivotInstruction struct {
+	ID         int    `json:"id"`
+	ListenPort int    `json:"listen_port"`
+	TargetHost string `json:"target_host"`
+	TargetPort int    `json:"target_port"`
+}
+
+type pivotStatus struct {
+	ID     int    `json:"id"`
+	Status string `json:"status"`
+	Error  string `json:"error,omitempty"`
+}
+
 type identity struct {
 	AgentID    string `json:"agent_id"`
 	AgentToken string `json:"agent_token"`
 }
 
 type enrollRequest struct {
-	Hostname         string `json:"hostname"`
-	Username         string `json:"username"`
-	OS               string `json:"os"`
-	Arch             string `json:"arch"`
-	AgentVersion     string `json:"agent_version"`
-	ProcessID        int    `json:"process_id"`
-	Executable       string `json:"executable"`
-	SandboxAvailable bool   `json:"sandbox_available"`
-	SandboxRuntime   string `json:"sandbox_runtime"`
+	Hostname         string        `json:"hostname"`
+	Username         string        `json:"username"`
+	OS               string        `json:"os"`
+	Arch             string        `json:"arch"`
+	AgentVersion     string        `json:"agent_version"`
+	ProcessID        int           `json:"process_id"`
+	Executable       string        `json:"executable"`
+	SandboxAvailable bool          `json:"sandbox_available"`
+	SandboxRuntime   string        `json:"sandbox_runtime"`
+	Networks         []networkInfo `json:"networks"`
+	PivotAvailable   bool          `json:"pivot_available"`
 }
 
 type enrollResponse struct {
@@ -61,16 +85,20 @@ type task struct {
 }
 
 type checkinResponse struct {
-	Task            *task `json:"task"`
-	CheckinInterval int   `json:"checkin_interval"`
+	Task            *task              `json:"task"`
+	Pivots          []pivotInstruction `json:"pivots"`
+	CheckinInterval int                `json:"checkin_interval"`
 }
 
 type heartbeatRequest struct {
-	AgentVersion     string `json:"agent_version"`
-	ProcessID        int    `json:"process_id"`
-	Executable       string `json:"executable"`
-	SandboxAvailable bool   `json:"sandbox_available"`
-	SandboxRuntime   string `json:"sandbox_runtime"`
+	AgentVersion     string        `json:"agent_version"`
+	ProcessID        int           `json:"process_id"`
+	Executable       string        `json:"executable"`
+	SandboxAvailable bool          `json:"sandbox_available"`
+	SandboxRuntime   string        `json:"sandbox_runtime"`
+	Networks         []networkInfo `json:"networks"`
+	PivotAvailable   bool          `json:"pivot_available"`
+	PivotStatuses    []pivotStatus `json:"pivot_statuses"`
 }
 
 type resultRequest struct {
@@ -85,6 +113,9 @@ func main() {
 	serverURL := strings.TrimRight(getenv("FORGE_SERVER", "http://127.0.0.1:8000"), "/")
 	enrollmentToken := os.Getenv("FORGE_ENROLLMENT_TOKEN")
 	sandbox := discoverSandbox()
+	pivotConfig := discoverPivotConfig(serverURL)
+	pivots := newPivotManager(pivotConfig)
+	defer pivots.Close()
 	if enrollmentToken == "" {
 		fatal("FORGE_ENROLLMENT_TOKEN is required")
 	}
@@ -97,7 +128,7 @@ func main() {
 	ident, err := loadIdentity(identityPath)
 	if errors.Is(err, os.ErrNotExist) {
 		var enrollment enrollResponse
-		enrollment, err = enroll(serverURL, enrollmentToken)
+		enrollment, err = enroll(serverURL, enrollmentToken, pivotConfig.Available)
 		if err != nil {
 			fatal(fmt.Sprintf("enrollment failed: %v", err))
 		}
@@ -122,12 +153,14 @@ func main() {
 	client := &http.Client{Timeout: 25 * time.Second}
 	interval := defaultCheckinInterval
 	for {
-		response, err := checkin(client, serverURL, ident, sandbox)
+		networks := collectNetworks()
+		response, err := checkin(client, serverURL, ident, sandbox, networks, pivotConfig.Available, pivots.Statuses())
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "[-] check-in error: %v\n", err)
 			time.Sleep(backoff(interval))
 			continue
 		}
+		pivots.Reconcile(response.Pivots, networks)
 		if response.CheckinInterval > 0 {
 			interval = time.Duration(response.CheckinInterval) * time.Second
 		}
@@ -166,7 +199,7 @@ func backoff(base time.Duration) time.Duration {
 	return base * 2
 }
 
-func enroll(serverURL, enrollmentToken string) (enrollResponse, error) {
+func enroll(serverURL, enrollmentToken string, pivotAvailable bool) (enrollResponse, error) {
 	hostname, _ := os.Hostname()
 	currentUser, _ := user.Current()
 	username := "unknown"
@@ -182,6 +215,8 @@ func enroll(serverURL, enrollmentToken string) (enrollResponse, error) {
 		ProcessID: os.Getpid(), Executable: executable,
 		SandboxAvailable: sandbox.Available,
 		SandboxRuntime:   sandbox.Runtime,
+		Networks:         collectNetworks(),
+		PivotAvailable:   pivotAvailable,
 	}
 	var parsed enrollResponse
 	if err := doJSON(http.MethodPost, serverURL+"/api/v1/agents/enroll", payload, &parsed, map[string]string{
@@ -192,11 +227,12 @@ func enroll(serverURL, enrollmentToken string) (enrollResponse, error) {
 	return parsed, nil
 }
 
-func checkin(client *http.Client, serverURL string, ident identity, sandbox sandboxConfig) (checkinResponse, error) {
+func checkin(client *http.Client, serverURL string, ident identity, sandbox sandboxConfig, networks []networkInfo, pivotAvailable bool, statuses []pivotStatus) (checkinResponse, error) {
 	executable, _ := os.Executable()
 	payload, _ := json.Marshal(heartbeatRequest{
 		AgentVersion: agentVersion, ProcessID: os.Getpid(), Executable: executable,
 		SandboxAvailable: sandbox.Available, SandboxRuntime: sandbox.Runtime,
+		Networks: networks, PivotAvailable: pivotAvailable, PivotStatuses: statuses,
 	})
 	req, err := http.NewRequest(http.MethodPost, fmt.Sprintf("%s/api/v1/agents/%s/checkin", serverURL, ident.AgentID), bytes.NewReader(payload))
 	if err != nil {
@@ -216,6 +252,216 @@ func checkin(client *http.Client, serverURL string, ident identity, sandbox sand
 	var parsed checkinResponse
 	err = json.NewDecoder(resp.Body).Decode(&parsed)
 	return parsed, err
+}
+
+type pivotConfig struct {
+	Enabled   bool
+	Available bool
+	SSHHost   string
+	SSHUser   string
+	SSHKey    string
+	SSHPort   string
+}
+
+type pivotProcess struct {
+	instruction pivotInstruction
+	cmd         *exec.Cmd
+}
+
+type pivotManager struct {
+	mu          sync.Mutex
+	config      pivotConfig
+	processes   map[int]*pivotProcess
+	statuses    map[int]pivotStatus
+	lastAttempt map[int]time.Time
+}
+
+func discoverPivotConfig(serverURL string) pivotConfig {
+	config := pivotConfig{
+		Enabled: strings.EqualFold(getenv("FORGE_PIVOT_ENABLED", "false"), "true"),
+		SSHHost: strings.TrimSpace(os.Getenv("FORGE_PIVOT_SSH_HOST")),
+		SSHUser: strings.TrimSpace(os.Getenv("FORGE_PIVOT_SSH_USER")),
+		SSHKey:  strings.TrimSpace(os.Getenv("FORGE_PIVOT_SSH_KEY")),
+		SSHPort: getenv("FORGE_PIVOT_SSH_PORT", "22"),
+	}
+	if !config.Enabled || runtime.GOOS != "linux" {
+		return config
+	}
+	if config.SSHHost == "" {
+		if parsed, err := url.Parse(serverURL); err == nil {
+			config.SSHHost = parsed.Hostname()
+		}
+	}
+	if config.SSHHost == "" || config.SSHUser == "" || config.SSHKey == "" {
+		return config
+	}
+	if _, err := os.Stat(config.SSHKey); err != nil {
+		return config
+	}
+	if _, err := exec.LookPath("ssh"); err != nil {
+		return config
+	}
+	config.Available = true
+	return config
+}
+
+func newPivotManager(config pivotConfig) *pivotManager {
+	return &pivotManager{
+		config:      config,
+		processes:   make(map[int]*pivotProcess),
+		statuses:    make(map[int]pivotStatus),
+		lastAttempt: make(map[int]time.Time),
+	}
+}
+
+func (m *pivotManager) Statuses() []pivotStatus {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	items := make([]pivotStatus, 0, len(m.statuses))
+	for _, status := range m.statuses {
+		items = append(items, status)
+	}
+	sort.Slice(items, func(i, j int) bool { return items[i].ID < items[j].ID })
+	return items
+}
+
+func (m *pivotManager) Reconcile(instructions []pivotInstruction, networks []networkInfo) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	desired := make(map[int]pivotInstruction, len(instructions))
+	for _, instruction := range instructions {
+		desired[instruction.ID] = instruction
+	}
+	for id, process := range m.processes {
+		if _, ok := desired[id]; !ok {
+			_ = process.cmd.Process.Kill()
+			delete(m.processes, id)
+			m.statuses[id] = pivotStatus{ID: id, Status: "stopped"}
+		}
+	}
+	for id, instruction := range desired {
+		if _, ok := m.processes[id]; ok {
+			continue
+		}
+		if !m.config.Available {
+			m.statuses[id] = pivotStatus{ID: id, Status: "failed", Error: "pivot SSH transport is not configured"}
+			continue
+		}
+		if instruction.TargetPort != 22 || !targetInsideNetworks(instruction.TargetHost, networks) {
+			m.statuses[id] = pivotStatus{ID: id, Status: "failed", Error: "target must be port 22 inside a directly connected network"}
+			continue
+		}
+		if last := m.lastAttempt[id]; !last.IsZero() && time.Since(last) < 10*time.Second {
+			continue
+		}
+		m.lastAttempt[id] = time.Now()
+		m.startLocked(instruction)
+	}
+}
+
+func (m *pivotManager) startLocked(instruction pivotInstruction) {
+	remoteForward := fmt.Sprintf("127.0.0.1:%d:%s:%d", instruction.ListenPort, instruction.TargetHost, instruction.TargetPort)
+	args := []string{
+		"-N", "-T", "-i", m.config.SSHKey, "-p", m.config.SSHPort,
+		"-o", "BatchMode=yes",
+		"-o", "ExitOnForwardFailure=yes",
+		"-o", "ServerAliveInterval=30",
+		"-o", "ServerAliveCountMax=3",
+		"-o", "StrictHostKeyChecking=accept-new",
+		"-R", remoteForward,
+		m.config.SSHUser + "@" + m.config.SSHHost,
+	}
+	cmd := exec.Command("ssh", args...)
+	cmd.Env = os.Environ()
+	var stderr bytes.Buffer
+	cmd.Stdout = io.Discard
+	cmd.Stderr = &stderr
+	if err := cmd.Start(); err != nil {
+		m.statuses[instruction.ID] = pivotStatus{ID: instruction.ID, Status: "failed", Error: err.Error()}
+		return
+	}
+	m.processes[instruction.ID] = &pivotProcess{instruction: instruction, cmd: cmd}
+	m.statuses[instruction.ID] = pivotStatus{ID: instruction.ID, Status: "active"}
+	go func(id int, process *exec.Cmd) {
+		err := process.Wait()
+		m.mu.Lock()
+		defer m.mu.Unlock()
+		current, exists := m.processes[id]
+		if !exists || current.cmd != process {
+			return
+		}
+		delete(m.processes, id)
+		message := strings.TrimSpace(stderr.String())
+		if err != nil && message == "" {
+			message = err.Error()
+		}
+		if message == "" {
+			message = "SSH relay exited"
+		}
+		m.statuses[id] = pivotStatus{ID: id, Status: "failed", Error: message}
+	}(instruction.ID, cmd)
+}
+
+func (m *pivotManager) Close() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for id, process := range m.processes {
+		_ = process.cmd.Process.Kill()
+		delete(m.processes, id)
+	}
+}
+
+func collectNetworks() []networkInfo {
+	interfaces, err := net.Interfaces()
+	if err != nil {
+		return nil
+	}
+	seen := map[string]bool{}
+	items := []networkInfo{}
+	for _, iface := range interfaces {
+		if iface.Flags&net.FlagUp == 0 || iface.Flags&net.FlagLoopback != 0 {
+			continue
+		}
+		addresses, err := iface.Addrs()
+		if err != nil {
+			continue
+		}
+		for _, address := range addresses {
+			ip, network, err := net.ParseCIDR(address.String())
+			if err != nil || ip.To4() == nil {
+				continue
+			}
+			network.IP = ip.Mask(network.Mask)
+			key := iface.Name + "|" + address.String()
+			if seen[key] {
+				continue
+			}
+			seen[key] = true
+			items = append(items, networkInfo{Interface: iface.Name, Address: address.String(), Network: network.String()})
+		}
+	}
+	sort.Slice(items, func(i, j int) bool {
+		if items[i].Interface == items[j].Interface {
+			return items[i].Address < items[j].Address
+		}
+		return items[i].Interface < items[j].Interface
+	})
+	return items
+}
+
+func targetInsideNetworks(target string, networks []networkInfo) bool {
+	ip := net.ParseIP(target)
+	if ip == nil || ip.To4() == nil {
+		return false
+	}
+	for _, item := range networks {
+		_, network, err := net.ParseCIDR(item.Network)
+		if err == nil && network.Contains(ip) {
+			return true
+		}
+	}
+	return false
 }
 
 type sandboxConfig struct {

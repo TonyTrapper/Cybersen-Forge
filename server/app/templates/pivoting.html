@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+{% block title %}Pivoting · {{ project_name }}{% endblock %}
+{% block heading %}Pivoting{% endblock %}
+{% block content %}
+<section class="panel page-hero">
+  <div>
+    <p class="eyebrow">NETWORK ACCESS</p>
+    <h2>Agentes disponibles para pivoting</h2>
+    <p>Selecciona un agente conectado, una de sus redes directamente alcanzables y el host interno que deseas publicar.</p>
+  </div>
+  <span id="pivot-summary" class="status-badge unknown">cargando</span>
+</section>
+
+<section id="pivot-agent-grid" class="pivot-agent-grid">
+  <div class="empty-state panel">Cargando agentes conectados…</div>
+</section>
+
+<section class="panel pivot-inventory-panel">
+  <div class="panel-header toolbar">
+    <div>
+      <p class="eyebrow">MANAGED RELAYS</p>
+      <h2>Pivotes administrados</h2>
+      <p>Listeners creados por Forge y asociados a cada agente.</p>
+    </div>
+  </div>
+  <div id="pivot-list" class="pivot-list pivot-global-list">
+    <div class="empty-state">No hay pivotes configurados.</div>
+  </div>
+</section>
+
+<div id="pivot-page-feedback" class="command-feedback" aria-live="polite"></div>
+{% endblock %}
+{% block scripts %}
+<script src="/static/pivoting.js?v=0.5.1" defer></script>
+{% endblock %}
