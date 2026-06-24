@@ -27,9 +27,9 @@ Cybersen Forge es una plataforma C2 desarrollada para el reto insignia **«Forja
 ## Arquitectura
 
 ```text
-                         Internet / laboratorio
-                                  │
-                                  ▼
+                        Internet / laboratorio
+                                 │
+                                 ▼
                       ┌──────────────────────┐
                       │ Cybersen Forge       │
                       │ FastAPI + SQLite     │
