@@ -10,7 +10,7 @@ Equipo **Cybersen** · Operador **TonyTrapper**
 
 </div>
 
-Cybersen Forge es una plataforma C2 desarrollada para el reto insignia **«Forja tu Yugo»**. Integra un servidor web, tablero multi-sesión y agentes reproducibles para Linux y Windows.
+Cybersen Forge es una plataforma C2 desarrollada para el reto insignia **«Forja tu Yugo»** del SecOpsDays CTF 2026. Integra un servidor web, tablero multi-sesión y agentes reproducibles para Linux y Windows.
 
 ## Capacidades actuales
 
