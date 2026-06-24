@@ -449,31 +449,68 @@ func sandboxShellArguments(sandbox sandboxConfig, containerName string) []string
 func executeCommand(command string) resultRequest {
 	ctx, cancel := context.WithTimeout(context.Background(), commandTimeout)
 	defer cancel()
+
 	started := time.Now()
-	cmd := exec.CommandContext(ctx, "/bin/sh", "-c", command)
+
+	var cmd *exec.Cmd
+
+	if runtime.GOOS == "windows" {
+		args, err := splitCommandLine(command)
+		if err != nil {
+			return resultRequest{
+				Stderr:   err.Error(),
+				ExitCode: 2,
+			}
+		}
+
+		if err := validateWindowsCommand(args); err != nil {
+			return resultRequest{
+				Stderr:   "command rejected by agent policy: " + err.Error(),
+				ExitCode: 126,
+			}
+		}
+
+		cmd = exec.CommandContext(ctx, args[0], args[1:]...)
+	} else {
+		cmd = exec.CommandContext(ctx, "/bin/sh", "-c", command)
+	}
+
 	cmd.Env = os.Environ()
-	var stdout, stderr bytes.Buffer
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
+
 	err := cmd.Run()
 	duration := time.Since(started).Milliseconds()
+
 	exitCode := 0
 	timedOut := false
+
 	if err != nil {
-		if exitErr, ok := err.(*exec.ExitError); ok {
+		var exitErr *exec.ExitError
+
+		if errors.As(err, &exitErr) {
 			exitCode = exitErr.ExitCode()
 		} else {
 			exitCode = 1
 		}
+
 		if ctx.Err() == context.DeadlineExceeded {
 			stderr.WriteString("\ncommand timed out")
 			exitCode = 124
 			timedOut = true
 		}
 	}
+
 	return resultRequest{
-		Stdout: truncate(stdout.String()), Stderr: truncate(stderr.String()),
-		ExitCode: exitCode, DurationMS: duration, TimedOut: timedOut,
+		Stdout:     truncate(stdout.String()),
+		Stderr:     truncate(stderr.String()),
+		ExitCode:   exitCode,
+		DurationMS: duration,
+		TimedOut:   timedOut,
 	}
 }
 
